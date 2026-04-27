@@ -387,6 +387,18 @@ input:focus { border-color: var(--green-500); }
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
 }
+
+/* Streak Badge */
+.streak-badge {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--amber-50); color: var(--amber-500);
+  padding: 6px 10px; border-radius: 20px;
+  font-weight: 700; font-size: 13px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+.dark .streak-badge {
+  background: rgba(245, 158, 11, 0.1);
+}
 </style>
 </head>
 <body>
@@ -519,6 +531,10 @@ input:focus { border-color: var(--green-500); }
         <button class="icon-btn" onclick="openAddModal()">
           <i data-lucide="plus" style="width:20px;height:20px;"></i>
         </button>
+        <div class="streak-badge" id="mh-streak">
+          <i data-lucide="flame" style="width:16px;height:16px;fill:var(--amber-500);stroke:var(--amber-500);"></i>
+          <span id="mh-streak-num">1</span>
+        </div>
         <div class="avatar" id="hdr-avatar" onclick="goPage('profile')">?</div>
       </div>
     </div>
@@ -533,6 +549,10 @@ input:focus { border-color: var(--green-500); }
         <button class="icon-btn">
           <i data-lucide="bell" style="width:20px;height:20px;"></i>
         </button>
+        <div class="streak-badge" id="dh-streak">
+          <i data-lucide="flame" style="width:18px;height:18px;fill:var(--amber-500);stroke:var(--amber-500);"></i>
+          <span id="dh-streak-num">1</span>
+        </div>
         <div class="avatar" id="dh-avatar" onclick="goPage('profile')">?</div>
       </div>
     </div>
@@ -586,6 +606,18 @@ input:focus { border-color: var(--green-500); }
               <i data-lucide="bar-chart-2" style="width:24px;height:24px;"></i>
             </div>
             <span style="font-size: 12px; font-weight: 600;">Insights</span>
+          </div>
+        </div>
+        
+        <!-- Badge of Consistency Card -->
+        <div class="card" id="consistency-badge" style="display:none; margin: 0 var(--sp-4) var(--sp-6); background: linear-gradient(135deg, var(--amber-500), #D97706); color: white; border: none; box-shadow: var(--sh-green);">
+          <div style="display:flex; align-items:center; gap:var(--sp-4);">
+            <div style="font-size:32px;">🏆</div>
+            <div>
+              <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; opacity:0.9;">Achievement Unlocked</div>
+              <div style="font-size:16px; font-weight:700;">Badge of Consistency</div>
+              <div style="font-size:12px; opacity:0.9; line-height:1.4;">Excellent! You've saved over 50% of your income this month. Keep it up!</div>
+            </div>
           </div>
         </div>
 
@@ -970,6 +1002,7 @@ function setTheme(mode) {
   
   body.classList.toggle('dark', isDark);
   DB.s('theme', mode);
+  if (user) apiCall('update_theme', { user_id: user.id, theme: mode });
 
   // Update buttons UI
   ['light', 'dark', 'auto'].forEach(m => {
@@ -1012,6 +1045,22 @@ function initTheme() {
 }
 
 /* ── DATA ── */
+const API_URL = 'api_v2.php';
+async function apiCall(action, data = {}) {
+  try {
+    const res = await fetch(`${API_URL}?action=${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('API Error:', e);
+    toast('Connection error', 'err');
+    return { error: 'Connection failed' };
+  }
+}
+
 const DB = { g: k=>{ try{return JSON.parse(localStorage.getItem('ft2_'+k)||'null')}catch(e){return null}}, s: (k,v)=>localStorage.setItem('ft2_'+k,JSON.stringify(v)) };
 let user = DB.g('user');
 let entries = DB.g('entries')||[];
@@ -1092,12 +1141,32 @@ function doSendOTP(){
   document.getElementById('otp-sub').textContent=`Sent to +254 ${p.slice(0,3)}XXXX${p.slice(-2)}`;
   goStep('as-otp'); document.getElementById('ob0').focus();
 }
-function doVerifyOTP(){
+async function doVerifyOTP(){
   const code=[0,1,2,3,4].map(i=>document.getElementById('ob'+i).value).join('');
   if(code.length<5){toast('Enter the 5-digit code','err');return;}
   const phone=document.getElementById('phone-inp').value.trim();
-  if(user&&user.phone===phone){launchApp();return;}
-  sessionStorage.setItem('sp','+254'+phone); goStep('as-profile');
+  
+  toast('Verifying...', 'ok');
+  const res = await apiCall('auth', { phone: '+254' + phone });
+  
+  if (res.error) { toast(res.error, 'err'); return; }
+  
+  if (res.new_user) {
+    sessionStorage.setItem('sp','+254'+phone); 
+    goStep('as-profile');
+  } else {
+    user = res.user;
+    entries = res.entries.map(e => ({...e, amount: parseFloat(e.amount), id: parseInt(e.id)}));
+    budgets = res.budgets.map(b => ({...b, limit: parseFloat(b.limit_amount), id: parseInt(b.id)}));
+    savingsGoals = res.goals.map(g => ({...g, target: parseFloat(g.target), saved: parseFloat(g.saved), id: parseInt(g.id)}));
+    
+    DB.s('user', user);
+    DB.s('entries', entries);
+    DB.s('budgets', budgets);
+    DB.s('goals', savingsGoals);
+    
+    launchApp();
+  }
 }
 function doSetup(){
   const name=document.getElementById('setup-name').value.trim();
@@ -1111,6 +1180,13 @@ function launchApp(){
   document.getElementById('app-shell').style.display='flex';
   lucide.createIcons();
   initApp();
+
+  // Streak notification
+  if (user.streak_count > 1) {
+    setTimeout(() => {
+      toast(`🔥 ${user.streak_count} day streak! You're on a roll!`, 'ok');
+    }, 1000);
+  }
 }
 
 /* OTP auto-advance */
@@ -1132,6 +1208,13 @@ function initApp(){
   document.getElementById('pn-phone').textContent=user.phone;
   document.getElementById('si-name-sub').textContent=user.name;
   document.getElementById('si-income-sub').textContent=user.income ? fmtFull(user.income) : 'Not set';
+
+  // Streak UI
+  const streak = user.streak_count || 1;
+  ['mh-streak-num', 'dh-streak-num'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = streak;
+  });
   
   buildGrids();
   renderHome();
@@ -1270,13 +1353,19 @@ function parseSMS(txt){
 }
 
 /* ── SAVE EXPENSE ── */
-function saveExpense(){
+async function saveExpense(){
   const amt=parseFloat(document.getElementById('ea-amount').value);
   const note=document.getElementById('ea-note').value.trim();
   const date=document.getElementById('ea-date').value||TODAY();
   if(!amt||amt<=0){toast('Enter a valid amount','err');return;}
-  entries.unshift({id:Date.now(),type:'expense',amount:amt,category:selCat,note,date,currency:CUR()});
+  
+  const entry = {id:Date.now(),type:'expense',amount:amt,category:selCat,note,date,currency:CUR()};
+  entries.unshift(entry);
   DB.s('entries',entries);
+  
+  // Async backend save
+  apiCall('save_entry', { user_id: user.id, entry });
+
   document.getElementById('ea-amount').value='';
   document.getElementById('ea-note').value='';
   document.getElementById('sms-inp').value='';
@@ -1287,13 +1376,19 @@ function saveExpense(){
 }
 
 /* ── SAVE INCOME ── */
-function saveIncome(){
+async function saveIncome(){
   const amt=parseFloat(document.getElementById('ia-amount').value);
   const note=document.getElementById('ia-note').value.trim();
   const date=document.getElementById('ia-date').value||TODAY();
   if(!amt||amt<=0){toast('Enter a valid amount','err');return;}
-  entries.unshift({id:Date.now(),type:'income',amount:amt,source:selSrc,note,date,currency:CUR()});
+  
+  const entry = {id:Date.now(),type:'income',amount:amt,source:selSrc,note,date,currency:CUR()};
+  entries.unshift(entry);
   DB.s('entries',entries);
+  
+  // Async backend save
+  apiCall('save_entry', { user_id: user.id, entry });
+
   document.getElementById('ia-amount').value='';
   document.getElementById('ia-note').value='';
   closeModal('add-modal');
@@ -1304,7 +1399,12 @@ function saveIncome(){
 /* ── DELETE ENTRY ── */
 function delEntry(id){
   if(!confirm('Delete this entry?'))return;
-  entries=entries.filter(e=>e.id!==id); DB.s('entries',entries);
+  entries=entries.filter(e=>e.id!==id); 
+  DB.s('entries',entries);
+  
+  // Async backend delete
+  apiCall('delete_entry', { user_id: user.id, id });
+  
   renderHome(); renderTxns(); toast('Deleted');
 }
 
@@ -1321,6 +1421,17 @@ function renderHome(){
   document.getElementById('bh-income').textContent=fmt(inc,cur);
   document.getElementById('bh-exp').textContent=fmt(exp,cur);
   document.getElementById('bh-period').textContent=new Date().toLocaleDateString('en-KE',{month:'long',year:'numeric'});
+  
+  // Consistency Badge Logic
+  const badgeEl = document.getElementById('consistency-badge');
+  if (inc > 0 && saved >= (inc / 2)) {
+    if (badgeEl.style.display === 'none') {
+       setTimeout(() => toast('🎉 Congratulations! You\'ve earned the Badge of Consistency!', 'ok'), 1000);
+    }
+    badgeEl.style.display = 'block';
+  } else {
+    badgeEl.style.display = 'none';
+  }
   
   // Health score
   renderHealthScore();
@@ -1486,8 +1597,13 @@ function saveBudget(){
   const limit=parseFloat(document.getElementById('bud-limit').value);
   if(!limit||limit<=0){toast('Enter a valid amount','err');return;}
   if(budgets.find(b=>b.category===selBudCat&&b.type==='expense')){toast('Budget exists for this category','err');return;}
-  budgets.push({id:Date.now(),type:'expense',category:selBudCat,limit,currency:CUR()});
+  const budget = {id:Date.now(),type:'expense',category:selBudCat,limit,currency:CUR()};
+  budgets.push(budget);
   DB.s('budgets',budgets);
+  
+  // Async backend save
+  apiCall('save_budget', { user_id: user.id, budget });
+
   document.getElementById('bud-limit').value='';
   closeModal('budget-modal');
   toast(`✓ Budget for ${CATS.find(c=>c.id===selBudCat)?.label||selBudCat} created`);
@@ -1499,8 +1615,13 @@ function saveSavingsGoal(){
   const saved=parseFloat(document.getElementById('sav-saved').value)||0;
   const type=document.getElementById('sav-type').value;
   if(!name||!target){toast('Enter name and target amount','err');return;}
-  savingsGoals.push({id:Date.now(),name,target,saved,type,currency:CUR(),createdAt:TODAY()});
+  const goal = {id:Date.now(),name,target,saved,type,currency:CUR(),createdAt:TODAY()};
+  savingsGoals.push(goal);
   DB.s('goals',savingsGoals);
+  
+  // Async backend save
+  apiCall('save_goal', { user_id: user.id, goal });
+
   document.getElementById('sav-name').value='';
   document.getElementById('sav-target').value='';
   document.getElementById('sav-saved').value='';
@@ -1510,11 +1631,15 @@ function saveSavingsGoal(){
 }
 function delBudget(id){
   if(!confirm('Delete this budget?'))return;
-  budgets=budgets.filter(b=>b.id!==id);DB.s('budgets',budgets);renderBudget();toast('Budget deleted');
+  budgets=budgets.filter(b=>b.id!==id);DB.s('budgets',budgets);
+  apiCall('delete_budget', { user_id: user.id, id });
+  renderBudget();toast('Budget deleted');
 }
 function delGoal(id){
   if(!confirm('Delete this goal?'))return;
-  savingsGoals=savingsGoals.filter(g=>g.id!==id);DB.s('goals',savingsGoals);renderBudget();toast('Goal deleted');
+  savingsGoals=savingsGoals.filter(g=>g.id!==id);DB.s('goals',savingsGoals);
+  apiCall('delete_goal', { user_id: user.id, id });
+  renderBudget();toast('Goal deleted');
 }
 function renderBudget(){
   const cur=CUR();
@@ -1621,12 +1746,24 @@ function doShare(){
 /* ── PROFILE ACTIONS ── */
 function editName(){
   const n=prompt('Your name:',user.name);
-  if(n&&n.trim()){user.name=n.trim();DB.s('user',user);initApp();toast('Name updated');}
+  if(n&&n.trim()){
+    user.name=n.trim();
+    DB.s('user',user);
+    apiCall('setup', { phone: user.phone, name: user.name, income: user.income, type: user.employment_type });
+    initApp();
+    toast('Name updated');
+  }
 }
 function editIncome(){
   const v=prompt('Monthly income (KES):',user.income||'');
   const inc=parseFloat(v);
-  if(!isNaN(inc)&&inc>0){user.income=inc;DB.s('user',user);document.getElementById('si-income-sub').textContent=fmtFull(inc);toast('Income updated');}
+  if(!isNaN(inc)&&inc>0){
+    user.income=inc;
+    DB.s('user',user);
+    apiCall('setup', { phone: user.phone, name: user.name, income: user.income, type: user.employment_type });
+    document.getElementById('si-income-sub').textContent=fmtFull(inc);
+    toast('Income updated');
+  }
 }
 function doExport(){
   const rows=[['Date','Type','Amount','Currency','Category/Source','Note']];
@@ -1641,6 +1778,7 @@ function doClear(){
   if(!confirm('Delete ALL your data? This cannot be undone.'))return;
   entries=[];budgets=[];savingsGoals=[];
   DB.s('entries',[]);DB.s('budgets',[]);DB.s('goals',[]);
+  apiCall('clear_all', { user_id: user.id });
   renderHome();toast('All data cleared');
 }
 
