@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Not Your GURU\\\\Desktop\\\\FinTrack\" -Recurse -Force)",
+      "Bash(Select-Object -Property FullName)",
+      "Bash(ConvertTo-Json -Depth 100)",
+      "Bash(Out-String)",
+      "Bash(sort -t: -k3)",
+      "Bash(uniq -D -f1)",
+      "Bash(awk -F'[: \\(]' '{print $3}')"
+    ]
+  }
+}
